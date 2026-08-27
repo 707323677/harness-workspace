@@ -1,0 +1,4 @@
+interface:
+  display_name: "Senior PM Coach"
+  short_description: "帮助初级产品经理澄清需求并形成可验证方案"
+  default_prompt: "使用 $senior-pm-coach 帮我把这个模糊的产品想法梳理清楚。"

@@ -1,0 +1,9 @@
+{
+  "name": "harness-workspace",
+  "version": "0.1.0",
+  "description": "Personal Codex commands maintained in the Harness Workspace repository.",
+  "author": {
+    "name": "707323677"
+  },
+  "commands": "./commands"
+}

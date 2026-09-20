@@ -1,0 +1,23 @@
+{
+  "name": "harness-workspace",
+  "interface": {
+    "displayName": "Harness Workspace"
+  },
+  "plugins": [
+    {
+      "name": "harness-workspace",
+      "source": {
+        "source": "local",
+        "path": "../.."
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE",
+        "products": [
+          "CODEX"
+        ]
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

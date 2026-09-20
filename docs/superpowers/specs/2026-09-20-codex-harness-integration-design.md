@@ -29,7 +29,7 @@ Rules 暂不作为自动链接目标。行为规则使用 Codex 的 `AGENTS.md`�
 
 ### 2. Agent 增量链接
 
-`agents/<name>` 下的角色文件逐项链接到 `$CODEX_HOME/agents/<name>`。Agent 只作为可按需调用的角色定义，不在每次命令执行时自动创建子 Agent。只有任务适合隔离、并行或需要专门角色时，Skill 才建议调用它。
+仓库中的 Agent 角色放在 `agents/<name>/role.toml`。安装时将仓库的 `agents/` 目录作为 `$CODEX_HOME/agents/harness-workspace` 子目录链接；Codex 会递归发现其中的 TOML 角色文件。这样既不替换已有 Agent，也能在 Windows 跨盘环境中使用目录 Junction。Agent 只作为可按需调用的角色定义，不在每次命令执行时自动创建子 Agent。只有任务适合隔离、并行或需要专门角色时，Skill 才建议调用它。
 
 ### 3. Slash command 注册
 
@@ -73,7 +73,8 @@ Codex 的 `/` 命令由插件的 `commands/` 目录提供，不采用未经证�
 
 - Create: `.codex-plugin/plugin.json` - 本地插件清单，仅声明个人工作区命令入口。
 - Create: `commands/senior-pm-coach.md` - `/senior-pm-coach` 命令路由。
-- Create: `agents/senior-pm-coach.toml` - 可按需调用的产品教练 Agent 角色。
+- Create: `agents/senior-pm-coach/role.toml` - 可按需调用的产品教练 Agent 角色。
+- Create: `.agents/plugins/marketplace.json` - Codex 本地 marketplace 清单。
 - Create: `scripts/link-codex.ps1` - Skill/Agent 增量链接和命令插件注册。
 - Modify: `README.md` - 安装、验证、冲突处理、卸载和命令用法。
 

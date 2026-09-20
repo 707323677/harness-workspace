@@ -94,3 +94,47 @@ Describe 'link-codex.ps1 filesystem lifecycle' {
         $output | Should Match 'Conflicts:\s+1'
     }
 }
+
+Describe 'link-codex.ps1 plugin lifecycle' {
+    It 'registers the repository command plugin in an isolated Codex home' {
+        $codexHome = Join-Path $TestDrive 'plugin-home'
+        $previousCodexHome = $env:CODEX_HOME
+        try {
+            $env:CODEX_HOME = $codexHome
+
+            & $scriptPath -CodexHome $codexHome | Out-Null
+            $pluginList = (codex plugin list --json | Out-String) | ConvertFrom-Json
+
+            $plugin = @($pluginList.installed | Where-Object { $_.pluginId -eq 'harness-workspace@harness-workspace' })
+            $plugin.Count | Should Be 1
+            $plugin[0].enabled | Should Be $true
+            $pluginCache = Join-Path $codexHome ("plugins/cache/harness-workspace/harness-workspace/{0}" -f $plugin[0].version)
+            $migratedCommand = Join-Path $pluginCache '.codex-plugin/migrated-command-skills/source-command-senior-pm-coach/SKILL.md'
+            (Test-Path -LiteralPath $migratedCommand) | Should Be $true
+        }
+        finally {
+            $env:CODEX_HOME = $previousCodexHome
+        }
+    }
+
+    It 'unregisters only its plugin and marketplace from an isolated Codex home' {
+        $codexHome = Join-Path $TestDrive 'plugin-unlink-home'
+        $previousCodexHome = $env:CODEX_HOME
+        try {
+            $env:CODEX_HOME = $codexHome
+            & $scriptPath -CodexHome $codexHome | Out-Null
+            $installedBeforeUnlink = (codex plugin list --json | Out-String) | ConvertFrom-Json
+            @($installedBeforeUnlink.installed | Where-Object { $_.pluginId -eq 'harness-workspace@harness-workspace' }).Count | Should Be 1
+
+            & $scriptPath -CodexHome $codexHome -Unlink | Out-Null
+
+            $pluginList = (codex plugin list --json | Out-String) | ConvertFrom-Json
+            @($pluginList.installed | Where-Object { $_.pluginId -eq 'harness-workspace@harness-workspace' }).Count | Should Be 0
+            $marketplaceList = (codex plugin marketplace list --json | Out-String) | ConvertFrom-Json
+            @($marketplaceList.marketplaces | Where-Object { $_.name -eq 'harness-workspace' }).Count | Should Be 0
+        }
+        finally {
+            $env:CODEX_HOME = $previousCodexHome
+        }
+    }
+}

@@ -55,6 +55,9 @@ function Write-Result {
 function Get-NormalizedPath {
     param([Parameter(Mandatory = $true)][string]$Path)
 
+    if ($Path.StartsWith('\\?\')) {
+        $Path = $Path.Substring(4)
+    }
     return [System.IO.Path]::GetFullPath($Path).TrimEnd(
         [System.IO.Path]::DirectorySeparatorChar,
         [System.IO.Path]::AltDirectorySeparatorChar
@@ -188,6 +191,162 @@ function Remove-DirectoryLink {
     }
 }
 
+function Invoke-CodexCommand {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    $codexCommand = Get-Command codex -ErrorAction SilentlyContinue
+    if ($null -eq $codexCommand) {
+        throw "The 'codex' CLI is not available on PATH."
+    }
+
+    $stderrPath = [System.IO.Path]::GetTempFileName()
+    try {
+        $stdout = & $codexCommand.Source @Arguments 2> $stderrPath
+        $exitCode = $LASTEXITCODE
+        $stderr = Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue
+        if ($exitCode -ne 0) {
+            $details = (@($stderr, ($stdout -join [Environment]::NewLine)) |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join [Environment]::NewLine
+            throw "codex $($Arguments -join ' ') failed with exit code $exitCode. $details"
+        }
+        return ($stdout -join [Environment]::NewLine)
+    }
+    finally {
+        Remove-Item -LiteralPath $stderrPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-CodexJson {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    $json = Invoke-CodexCommand -Arguments $Arguments
+    if ([string]::IsNullOrWhiteSpace($json)) {
+        return $null
+    }
+    return $json | ConvertFrom-Json
+}
+
+function Test-MarketplaceMatchesRepository {
+    param([Parameter(Mandatory = $true)]$Marketplace)
+
+    if ([string]::IsNullOrWhiteSpace($Marketplace.root)) {
+        return $false
+    }
+    return (Get-NormalizedPath $Marketplace.root) -eq (Get-NormalizedPath $repoRoot)
+}
+
+function Install-CommandPlugin {
+    $marketplaceName = 'harness-workspace'
+    $pluginId = 'harness-workspace@harness-workspace'
+
+    try {
+        $marketplaceList = Get-CodexJson -Arguments @('plugin', 'marketplace', 'list', '--json')
+        $marketplaces = @($marketplaceList.marketplaces | Where-Object { $_.name -eq $marketplaceName })
+        if ($marketplaces.Count -gt 0 -and -not (Test-MarketplaceMatchesRepository $marketplaces[0])) {
+            Write-Result -Kind Conflicts -Message "Marketplace '$marketplaceName' already points elsewhere: $($marketplaces[0].root)"
+            return
+        }
+
+        if ($marketplaces.Count -eq 0) {
+            if ($DryRun) {
+                Write-Result -Kind Planned -Message "Register marketplace '$marketplaceName' from $repoRoot"
+            }
+            else {
+                Invoke-CodexCommand -Arguments @('plugin', 'marketplace', 'add', $repoRoot, '--json') | Out-Null
+                Write-Result -Kind Created -Message "Marketplace '$marketplaceName' registered."
+            }
+        }
+        else {
+            Write-Result -Kind Skipped -Message "Marketplace '$marketplaceName' is already registered."
+        }
+
+        $pluginList = Get-CodexJson -Arguments @('plugin', 'list', '--json')
+        $plugins = @($pluginList.installed | Where-Object { $_.pluginId -eq $pluginId })
+        if ($plugins.Count -gt 0) {
+            $pluginMarketplaceSource = $plugins[0].marketplaceSource.source
+            if (-not [string]::IsNullOrWhiteSpace($pluginMarketplaceSource) -and
+                (Get-NormalizedPath $pluginMarketplaceSource) -ne (Get-NormalizedPath $repoRoot)) {
+                Write-Result -Kind Conflicts -Message "Plugin '$pluginId' is installed from another marketplace source."
+                return
+            }
+
+            if (-not $Force) {
+                Write-Result -Kind Skipped -Message "Plugin '$pluginId' is already installed."
+                return
+            }
+
+            if ($DryRun) {
+                Write-Result -Kind Planned -Message "Reinstall plugin '$pluginId' from $repoRoot"
+                return
+            }
+            Invoke-CodexCommand -Arguments @('plugin', 'remove', $pluginId, '--json') | Out-Null
+        }
+
+        if ($DryRun) {
+            Write-Result -Kind Planned -Message "Install plugin '$pluginId'"
+        }
+        else {
+            Invoke-CodexCommand -Arguments @('plugin', 'add', $pluginId, '--json') | Out-Null
+            Write-Result -Kind Created -Message "Plugin '$pluginId' installed."
+        }
+    }
+    catch {
+        Write-Result -Kind Failed -Message "Could not register command plugin: $($_.Exception.Message)"
+    }
+}
+
+function Uninstall-CommandPlugin {
+    $marketplaceName = 'harness-workspace'
+    $pluginId = 'harness-workspace@harness-workspace'
+
+    try {
+        $marketplaceList = Get-CodexJson -Arguments @('plugin', 'marketplace', 'list', '--json')
+        $marketplaces = @($marketplaceList.marketplaces | Where-Object { $_.name -eq $marketplaceName })
+        if ($marketplaces.Count -gt 0 -and -not (Test-MarketplaceMatchesRepository $marketplaces[0])) {
+            Write-Result -Kind Conflicts -Message "Marketplace '$marketplaceName' points elsewhere and was not removed."
+            return
+        }
+
+        $pluginList = Get-CodexJson -Arguments @('plugin', 'list', '--json')
+        $plugins = @($pluginList.installed | Where-Object { $_.pluginId -eq $pluginId })
+        if ($plugins.Count -gt 0) {
+            $pluginMarketplaceSource = $plugins[0].marketplaceSource.source
+            if (-not [string]::IsNullOrWhiteSpace($pluginMarketplaceSource) -and
+                (Get-NormalizedPath $pluginMarketplaceSource) -ne (Get-NormalizedPath $repoRoot)) {
+                Write-Result -Kind Conflicts -Message "Plugin '$pluginId' comes from another source and was not removed."
+                return
+            }
+
+            if ($DryRun) {
+                Write-Result -Kind Planned -Message "Remove plugin '$pluginId'"
+            }
+            else {
+                Invoke-CodexCommand -Arguments @('plugin', 'remove', $pluginId, '--json') | Out-Null
+                Write-Result -Kind Removed -Message "Plugin '$pluginId' removed."
+            }
+        }
+        else {
+            Write-Result -Kind Skipped -Message "Plugin '$pluginId' is not installed."
+        }
+
+        if ($marketplaces.Count -gt 0) {
+            if ($DryRun) {
+                Write-Result -Kind Planned -Message "Remove marketplace '$marketplaceName'"
+            }
+            else {
+                Invoke-CodexCommand -Arguments @('plugin', 'marketplace', 'remove', $marketplaceName, '--json') | Out-Null
+                Write-Result -Kind Removed -Message "Marketplace '$marketplaceName' removed."
+            }
+        }
+        else {
+            Write-Result -Kind Skipped -Message "Marketplace '$marketplaceName' is not registered."
+        }
+    }
+    catch {
+        Write-Result -Kind Failed -Message "Could not unregister command plugin: $($_.Exception.Message)"
+    }
+}
+
 $linkDefinitions = @()
 $skillsRoot = Join-Path $repoRoot 'skills'
 if (Test-Path -LiteralPath $skillsRoot) {
@@ -219,6 +378,22 @@ foreach ($definition in $linkDefinitions) {
     }
     else {
         Add-DirectoryLink -Source $definition.Source -Target $definition.Target -Label $definition.Label
+    }
+}
+
+if (-not $SkipPluginRegistration) {
+    $previousCodexHome = $env:CODEX_HOME
+    try {
+        $env:CODEX_HOME = $CodexHome
+        if ($Unlink) {
+            Uninstall-CommandPlugin
+        }
+        else {
+            Install-CommandPlugin
+        }
+    }
+    finally {
+        $env:CODEX_HOME = $previousCodexHome
     }
 }
 

@@ -10,7 +10,7 @@ Describe 'Codex harness artifacts' {
         $plugin = @($marketplace.plugins | Where-Object { $_.name -eq 'harness-workspace' })
         $plugin.Count | Should Be 1
         $plugin[0].source.source | Should Be 'local'
-        $plugin[0].source.path | Should Be '../..'
+        $plugin[0].source.path | Should Be '.'
         (@($plugin[0].policy.products) -contains 'CODEX') | Should Be $true
     }
 
